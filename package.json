@@ -1,0 +1,123 @@
+{
+  "name": "distance-measurement-app",
+  "version": "1.0.0",
+  "description": "Professional AR and camera-based distance measurement web app",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "dev": "npx http-server -p 8000 -c-1",
+    "preview": "npx http-server dist -p 8080",
+    "deploy": "npx vercel --prod",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "keywords": [
+    "distance-measurement",
+    "webxr",
+    "ar",
+    "camera",
+    "measurement",
+    "triangle-similarity",
+    "web-app",
+    "mobile",
+    "javascript",
+    "three.js"
+  ],
+  "author": {
+    "name": "Your Name",
+    "email": "your.email@example.com",
+    "url": "https://github.com/yourusername"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/yourusername/distance-measurement-app#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/distance-measurement-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/distance-measurement-app/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "browserslist": [
+    "last 2 versions",
+    "> 1%",
+    "not ie 11"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  },
+  "files": [
+    "index.html",
+    "styles/",
+    "scripts/",
+    "README.md"
+  ],
+  "config": {
+    "port": 8000,
+    "host": "localhost"
+  },
+  "vercel": {
+    "version": 2,
+    "builds": [
+      {
+        "src": "index.html",
+        "use": "@vercel/static"
+      }
+    ],
+    "routes": [
+      {
+        "src": "/(.*)",
+        "dest": "/$1"
+      }
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "browser": true,
+      "es2021": true
+    },
+    "extends": [
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "ecmaVersion": 12,
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-unused-vars": "warn",
+      "no-console": "off"
+    }
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": true,
+    "tabWidth": 2,
+    "trailingComma": "es5"
+  },
+  "metadata": {
+    "title": "Distance Measurement App",
+    "description": "Measure real-world distances using WebXR AR and camera-based techniques",
+    "category": "Utility",
+    "tags": [
+      "measurement",
+      "ar",
+      "webxr",
+      "camera",
+      "mobile"
+    ],
+    "features": [
+      "WebXR AR measurement",
+      "Camera-based measurement",
+      "Multiple unit support",
+      "Data export",
+      "Mobile responsive"
+    ],
+    "compatibility": {
+      "webxr": "Chrome 79+, Samsung Internet 13+",
+      "camera": "All modern browsers",
+      "https": "Required for camera access"
+    }
+  }
+}
