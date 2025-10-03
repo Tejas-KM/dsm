@@ -3,16 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Distance Measurement App</title>
-    <meta name="description" content="Professional distance measurement app using WebXR AR and camera-based triangle similarity">
+    <title>Accurate Distance Measurement - OpenCV Enhanced</title>
+    <meta name="description" content="High-accuracy distance measurement using OpenCV.js perspective correction">
     <link rel="stylesheet" href="styles/style.css">
+    <!-- OpenCV.js for advanced computer vision -->
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    <!-- Three.js for WebXR -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
     <div id="app">
         <!-- Header -->
         <header class="app-header">
-            <h1>📏 Distance Meter</h1>
+            <h1>📏 Accurate Distance Meter</h1>
             <div class="header-controls">
                 <select id="unitSelector" class="form-control unit-selector">
                     <option value="mm">mm</option>
@@ -21,6 +24,7 @@
                     <option value="in">inches</option>
                     <option value="ft">feet</option>
                 </select>
+                <button id="settingsBtn" class="settings-btn" title="Settings">⚙️</button>
             </div>
         </header>
 
@@ -29,8 +33,15 @@
             <!-- Mode Selection Screen -->
             <div id="modeSelection" class="mode-selection">
                 <div class="app-intro">
-                    <h2>📐 Measure Real-World Objects</h2>
-                    <p>Choose your measurement method based on your device capabilities</p>
+                    <h2>🎯 Professional Distance Measurement</h2>
+                    <p>Enhanced with OpenCV perspective correction for accurate results</p>
+                </div>
+                
+                <div class="opencv-status">
+                    <div id="opencvStatus" class="status-indicator loading">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Loading OpenCV.js...</span>
+                    </div>
                 </div>
                 
                 <div class="capability-info">
@@ -41,25 +52,37 @@
                 </div>
                 
                 <div class="mode-buttons">
-                    <button id="arModeBtn" class="mode-btn ar-mode" disabled>
-                        <div class="mode-icon">🥽</div>
-                        <div class="mode-title">AR Mode</div>
-                        <div class="mode-description">High accuracy using device AR capabilities</div>
+                    <button id="precisionModeBtn" class="mode-btn precision-mode">
+                        <div class="mode-icon">🔬</div>
+                        <div class="mode-title">Precision Mode</div>
+                        <div class="mode-description">OpenCV perspective correction for high accuracy</div>
                         <div class="mode-features">
-                            <span class="feature">✓ Sub-centimeter accuracy</span>
-                            <span class="feature">✓ 3D surface detection</span>
-                            <span class="feature">✓ Multiple point measurement</span>
+                            <span class="feature">✓ Perspective correction</span>
+                            <span class="feature">✓ Lens distortion removal</span>
+                            <span class="feature">✓ Multi-point calibration</span>
+                            <span class="feature">✓ ±2-5% accuracy</span>
                         </div>
                     </button>
                     
-                    <button id="cameraModeBtn" class="mode-btn camera-mode">
+                    <button id="arModeBtn" class="mode-btn ar-mode" disabled>
+                        <div class="mode-icon">🥽</div>
+                        <div class="mode-title">AR Mode</div>
+                        <div class="mode-description">WebXR for supported devices</div>
+                        <div class="mode-features">
+                            <span class="feature">✓ Sub-centimeter accuracy</span>
+                            <span class="feature">✓ 3D surface detection</span>
+                            <span class="feature">✓ Real-time tracking</span>
+                        </div>
+                    </button>
+                    
+                    <button id="basicModeBtn" class="mode-btn basic-mode">
                         <div class="mode-icon">📷</div>
-                        <div class="mode-title">Camera Mode</div>
-                        <div class="mode-description">Works on all devices with camera</div>
+                        <div class="mode-title">Basic Mode</div>
+                        <div class="mode-description">Simple measurement for quick tasks</div>
                         <div class="mode-features">
                             <span class="feature">✓ Universal compatibility</span>
-                            <span class="feature">✓ Reference object calibration</span>
-                            <span class="feature">✓ Good accuracy</span>
+                            <span class="feature">✓ Quick setup</span>
+                            <span class="feature">✓ Good for small objects</span>
                         </div>
                     </button>
                 </div>
@@ -69,6 +92,7 @@
             <div id="cameraContainer" class="camera-container hidden">
                 <video id="cameraVideo" class="camera-video hidden" autoplay muted playsinline></video>
                 <canvas id="measurementCanvas" class="measurement-canvas hidden"></canvas>
+                <canvas id="opencvCanvas" class="opencv-canvas hidden"></canvas>
                 <div id="arContainer" class="ar-container hidden"></div>
                 
                 <!-- Camera Overlay UI -->
@@ -77,29 +101,37 @@
                         <div id="currentDistance" class="current-distance hidden">
                             <span class="distance-value">0.00</span>
                             <span class="distance-unit">m</span>
+                            <div class="accuracy-badge">
+                                <span id="accuracyBadge" class="accuracy-text">High Precision</span>
+                            </div>
                         </div>
-                        <div id="accuracyIndicator" class="accuracy-indicator hidden">
-                            <span class="accuracy-text">Accuracy: Medium</span>
+                        
+                        <div id="calibrationStatus" class="calibration-status hidden">
+                            <div class="calibration-progress">
+                                <div class="progress-bar">
+                                    <div id="progressFill" class="progress-fill"></div>
+                                </div>
+                                <span id="calibrationText" class="calibration-text">Place reference object</span>
+                            </div>
                         </div>
-                        <div id="instructionsText" class="instructions-text hidden">
+                        
+                        <div id="instructionsText" class="instructions-text">
                             Point your camera at objects and start measuring
                         </div>
-                    </div>
-                    
-                    <!-- AR Mode Controls -->
-                    <div id="arControls" class="ar-controls hidden">
-                        <div class="ar-reticle"></div>
-                        <div class="ar-instructions">Move your device to detect surfaces</div>
                     </div>
                     
                     <div class="camera-controls">
                         <button id="measureBtn" class="control-btn measure-btn">
                             <span class="btn-icon">📐</span>
-                            <span class="btn-text">Start Measuring</span>
+                            <span class="btn-text">Start Precision Measurement</span>
                         </button>
                         <button id="clearBtn" class="control-btn clear-btn hidden">
                             <span class="btn-icon">🗑️</span>
                             <span class="btn-text">Clear</span>
+                        </button>
+                        <button id="undoBtn" class="control-btn undo-btn hidden">
+                            <span class="btn-icon">↶</span>
+                            <span class="btn-text">Undo</span>
                         </button>
                         <button id="backBtn" class="control-btn back-btn">
                             <span class="btn-icon">⬅️</span>
@@ -109,39 +141,83 @@
                 </div>
             </div>
 
-            <!-- Calibration Modal -->
-            <div id="calibrationModal" class="modal hidden">
-                <div class="modal-content">
-                    <h3>📏 Camera Calibration Required</h3>
-                    <p>To measure accurately, we need to calibrate using a reference object of known size.</p>
+            <!-- Precision Calibration Modal -->
+            <div id="precisionCalibrationModal" class="modal hidden">
+                <div class="modal-content precision-calibration">
+                    <h3>🔬 Precision Calibration Setup</h3>
+                    <p>For maximum accuracy, we'll use 4-corner perspective correction with OpenCV</p>
                     
-                    <div class="reference-objects">
-                        <label for="referenceSelect">Choose your reference object:</label>
-                        <select id="referenceSelect" class="reference-select">
+                    <div class="calibration-method">
+                        <label>Choose calibration method:</label>
+                        <div class="method-options">
+                            <label class="method-option">
+                                <input type="radio" name="calibrationMethod" value="rectangle" checked>
+                                <span class="option-content">
+                                    <strong>📄 Rectangle Object</strong>
+                                    <small>Credit card, paper, book, etc.</small>
+                                </span>
+                            </label>
+                            <label class="method-option">
+                                <input type="radio" name="calibrationMethod" value="square">
+                                <span class="option-content">
+                                    <strong>⬜ Square Object</strong>
+                                    <small>Post-it note, tile, etc.</small>
+                                </span>
+                            </label>
+                            <label class="method-option">
+                                <input type="radio" name="calibrationMethod" value="custom">
+                                <span class="option-content">
+                                    <strong>📏 Custom Dimensions</strong>
+                                    <small>Enter exact measurements</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div id="referenceObjectSelector" class="reference-objects">
+                        <label for="precisionReferenceSelect">Reference Object:</label>
+                        <select id="precisionReferenceSelect" class="reference-select">
                             <option value="credit_card">Credit Card (85.6mm × 53.98mm)</option>
-                            <option value="quarter">US Quarter (24.26mm diameter)</option>
-                            <option value="iphone">iPhone Standard (67.3mm wide)</option>
-                            <option value="a4_paper">A4 Paper (210mm × 297mm)</option>
                             <option value="business_card">Business Card (89mm × 51mm)</option>
+                            <option value="a4_paper">A4 Paper (210mm × 297mm)</option>
+                            <option value="letter_paper">US Letter (216mm × 279mm)</option>
+                            <option value="post_it">Post-it Note (76mm × 76mm)</option>
+                            <option value="custom">Custom Dimensions</option>
                         </select>
                     </div>
                     
-                    <div class="calibration-instructions">
-                        <h4>Calibration Steps:</h4>
+                    <div id="customDimensions" class="custom-dimensions hidden">
+                        <div class="dimension-inputs">
+                            <div class="input-group">
+                                <label for="customWidth">Width (mm):</label>
+                                <input type="number" id="customWidth" placeholder="85.6" step="0.1">
+                            </div>
+                            <div class="input-group">
+                                <label for="customHeight">Height (mm):</label>
+                                <input type="number" id="customHeight" placeholder="53.98" step="0.1">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="precision-instructions">
+                        <h4>📋 Calibration Steps:</h4>
                         <ol>
-                            <li>Place the selected object clearly in the camera view</li>
-                            <li>Ensure good lighting and the object is flat</li>
-                            <li>Click on both ends of the object's width</li>
-                            <li>The app will calculate the scale factor</li>
+                            <li><strong>Place object flat</strong> on the same surface as items to measure</li>
+                            <li><strong>Ensure good lighting</strong> and avoid shadows</li>
+                            <li><strong>Click all 4 corners</strong> in order: top-left → top-right → bottom-right → bottom-left</li>
+                            <li><strong>OpenCV will correct</strong> perspective distortion automatically</li>
                         </ol>
-                        <div class="tip">
-                            <strong>💡 Tip:</strong> Credit cards provide the most accurate calibration
+                        <div class="accuracy-note">
+                            <strong>🎯 Expected Accuracy:</strong> ±2-5% with proper calibration
                         </div>
                     </div>
                     
                     <div class="modal-actions">
-                        <button id="startCalibrationBtn" class="btn-primary">
-                            <span>🎯 Start Calibration</span>
+                        <button id="startPrecisionCalibrationBtn" class="btn-primary">
+                            🚀 Start Precision Calibration
+                        </button>
+                        <button id="skipCalibrationBtn" class="btn-secondary">
+                            Skip (Use Basic Mode)
                         </button>
                     </div>
                 </div>
@@ -153,6 +229,7 @@
                     <h3>📊 Measurement Results</h3>
                     <div class="results-summary">
                         <span id="measurementCount">0 measurements</span>
+                        <span id="accuracyLevel" class="accuracy-level">High Precision</span>
                     </div>
                 </div>
                 
@@ -169,68 +246,80 @@
                         <span class="btn-icon">🆕</span>
                         <span class="btn-text">New Measurement</span>
                     </button>
+                    <button id="recalibrateBtn" class="btn-secondary">
+                        <span class="btn-icon">🔄</span>
+                        <span class="btn-text">Recalibrate</span>
+                    </button>
                 </div>
             </div>
 
-            <!-- Help Modal -->
-            <div id="helpModal" class="modal hidden">
+            <!-- Settings Modal -->
+            <div id="settingsModal" class="modal hidden">
                 <div class="modal-content">
-                    <h3>❓ How to Use</h3>
-                    <div class="help-content">
-                        <div class="help-section">
-                            <h4>🥽 AR Mode (Android Chrome)</h4>
-                            <ul>
-                                <li>Move your device to detect surfaces</li>
-                                <li>Tap to place measurement points</li>
-                                <li>Measure between multiple points</li>
-                            </ul>
+                    <h3>⚙️ Settings</h3>
+                    
+                    <div class="settings-section">
+                        <h4>Camera Settings</h4>
+                        <div class="setting-item">
+                            <label for="cameraResolution">Resolution:</label>
+                            <select id="cameraResolution">
+                                <option value="1920x1080" selected>1920×1080 (Recommended)</option>
+                                <option value="1280x720">1280×720</option>
+                                <option value="3840x2160">3840×2160 (4K)</option>
+                            </select>
                         </div>
-                        
-                        <div class="help-section">
-                            <h4>📷 Camera Mode (All Devices)</h4>
-                            <ul>
-                                <li>Calibrate with a reference object first</li>
-                                <li>Click two points to measure distance</li>
-                                <li>Ensure good lighting and steady hands</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="help-section">
-                            <h4>🎯 Best Practices</h4>
-                            <ul>
-                                <li>Use rear camera for better accuracy</li>
-                                <li>Hold device steady while measuring</li>
-                                <li>Measure objects at eye level when possible</li>
-                                <li>Re-calibrate if measurements seem off</li>
-                            </ul>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" id="stabilizationMode" checked>
+                                <span>Image stabilization</span>
+                            </label>
                         </div>
                     </div>
-                    <button id="closeHelpBtn" class="btn-primary">Got it!</button>
+                    
+                    <div class="settings-section">
+                        <h4>Measurement Settings</h4>
+                        <div class="setting-item">
+                            <label for="accuracyMode">Accuracy Mode:</label>
+                            <select id="accuracyMode">
+                                <option value="high" selected>High Precision (Slower)</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="fast">Fast (Lower accuracy)</option>
+                            </select>
+                        </div>
+                        <div class="setting-item">
+                            <label for="decimalPlaces">Decimal Places:</label>
+                            <select id="decimalPlaces">
+                                <option value="1">1</option>
+                                <option value="2" selected>2</option>
+                                <option value="3">3</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button id="saveSettingsBtn" class="btn-primary">Save Settings</button>
+                        <button id="closeSettingsBtn" class="btn-secondary">Close</button>
+                    </div>
                 </div>
             </div>
         </main>
-
-        <!-- Footer -->
-        <footer class="app-footer hidden">
-            <div class="footer-content">
-                <button id="helpBtn" class="footer-btn">❓ Help</button>
-                <div class="footer-info">
-                    <span>Distance Measurement App v1.0</span>
-                </div>
-            </div>
-        </footer>
     </div>
 
     <!-- Loading Screen -->
     <div id="loadingScreen" class="loading-screen">
         <div class="loading-content">
             <div class="loading-icon">📏</div>
-            <h2>Distance Meter</h2>
+            <h2>Accurate Distance Meter</h2>
             <div class="loading-spinner"></div>
-            <p>Initializing camera and AR capabilities...</p>
+            <p id="loadingText">Loading OpenCV.js for precision measurement...</p>
+            <div class="loading-progress">
+                <div class="progress-bar">
+                    <div id="loadingProgress" class="progress-fill"></div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <script src="scripts/app.js"></script>
+    <script src="scripts/opencv-enhanced-app.js"></script>
 </body>
 </html>
