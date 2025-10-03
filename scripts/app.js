@@ -1,50 +1,14 @@
 /**
- * Accurate Distance Measurement App with OpenCV.js
- * Uses perspective correction for high accuracy measurements
+ * Fixed Accurate Distance Measurement App
+ * Handles OpenCV loading failures gracefully
  */
-
-// Global variables
-let cv = null; // OpenCV.js instance
-let isOpenCVReady = false;
-
-// OpenCV ready callback
-function onOpenCvReady() {
-    cv = window.cv;
-    isOpenCVReady = true;
-    console.log('✅ OpenCV.js loaded successfully');
-    
-    // Update UI
-    const opencvStatus = document.getElementById('opencvStatus');
-    if (opencvStatus) {
-        opencvStatus.className = 'status-indicator ready';
-        opencvStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">OpenCV.js Ready</span>';
-    }
-    
-    // Update loading progress
-    updateLoadingProgress(100);
-    
-    // Hide loading screen after a delay
-    setTimeout(() => {
-        const loadingScreen = document.getElementById('loadingScreen');
-        if (loadingScreen) {
-            loadingScreen.classList.add('hidden');
-        }
-    }, 1000);
-}
-
-function updateLoadingProgress(percentage) {
-    const progressFill = document.getElementById('loadingProgress');
-    if (progressFill) {
-        progressFill.style.width = percentage + '%';
-    }
-}
 
 class AccurateDistanceMeasurementApp {
     constructor() {
         // App State
         this.currentMode = null;
         this.isCalibrated = false;
-        this.calibrationData = null; // Stores perspective transform matrix
+        this.calibrationData = null;
         this.measurements = [];
         this.measurementPoints = [];
         this.calibrationPoints = [];
@@ -52,8 +16,13 @@ class AccurateDistanceMeasurementApp {
         this.isMeasuring = false;
         this.isCalibrationMode = false;
         this.referenceObject = null;
+        this.currentStep = 0;
+        
+        // OpenCV state
+        this.isOpenCVReady = false;
+        this.openCVFailed = false;
+        this.cv = null;
         this.perspectiveMatrix = null;
-        this.currentStep = 0; // For multi-step calibration
         
         // DOM Elements
         this.elements = {};
@@ -61,24 +30,21 @@ class AccurateDistanceMeasurementApp {
         this.ctx = null;
         this.video = null;
         this.stream = null;
-        this.opencvCanvas = null;
         
-        // Enhanced Reference Objects with precise dimensions
+        // Enhanced Reference Objects
         this.referenceObjects = {
             credit_card: { 
                 name: "Credit Card", 
                 width: 85.6, 
                 height: 53.98, 
                 unit: "mm",
-                type: "rectangle",
-                tolerance: 0.5 // ±0.5mm tolerance
+                tolerance: 0.5
             },
             business_card: { 
                 name: "Business Card", 
                 width: 89, 
                 height: 51, 
                 unit: "mm",
-                type: "rectangle",
                 tolerance: 1.0
             },
             a4_paper: { 
@@ -86,7 +52,6 @@ class AccurateDistanceMeasurementApp {
                 width: 210, 
                 height: 297, 
                 unit: "mm",
-                type: "rectangle",
                 tolerance: 2.0
             },
             letter_paper: { 
@@ -94,7 +59,6 @@ class AccurateDistanceMeasurementApp {
                 width: 216, 
                 height: 279, 
                 unit: "mm",
-                type: "rectangle",
                 tolerance: 2.0
             },
             post_it: { 
@@ -102,12 +66,17 @@ class AccurateDistanceMeasurementApp {
                 width: 76, 
                 height: 76, 
                 unit: "mm",
-                type: "square",
                 tolerance: 1.0
+            },
+            quarter: { 
+                name: "US Quarter", 
+                diameter: 24.26, 
+                unit: "mm",
+                tolerance: 0.2
             }
         };
         
-        // Unit Conversion Factors (to mm)
+        // Unit Conversion Factors
         this.units = {
             mm: { name: "Millimeters", symbol: "mm", factor: 1 },
             cm: { name: "Centimeters", symbol: "cm", factor: 0.1 },
@@ -119,27 +88,23 @@ class AccurateDistanceMeasurementApp {
         // Settings
         this.settings = {
             cameraResolution: { width: 1920, height: 1080 },
-            accuracyMode: 'high',
             decimalPlaces: 2,
-            stabilizationMode: true
+            enhancedCalibration: true
         };
         
         this.init();
     }
     
     async init() {
-        console.log('🚀 Initializing Accurate Distance Measurement App');
+        console.log('🚀 Initializing Fixed Distance Measurement App');
         
         try {
             this.cacheElements();
             this.setupEventListeners();
             await this.checkCapabilities();
             
-            // Wait for OpenCV if not ready
-            if (!isOpenCVReady) {
-                console.log('⏳ Waiting for OpenCV.js to load...');
-                this.waitForOpenCV();
-            }
+            // Start loading progress
+            this.startLoadingSequence();
             
             console.log('✅ App initialized successfully');
         } catch (error) {
@@ -148,16 +113,81 @@ class AccurateDistanceMeasurementApp {
         }
     }
     
-    waitForOpenCV() {
-        const checkOpenCV = () => {
-            if (isOpenCVReady) {
-                console.log('✅ OpenCV.js is ready, enabling precision mode');
-                this.enablePrecisionMode();
-            } else {
-                setTimeout(checkOpenCV, 100);
+    startLoadingSequence() {
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            progress += 3;
+            this.updateLoadingProgress(Math.min(progress, 95));
+            
+            if (progress >= 95) {
+                clearInterval(progressInterval);
+                // Complete loading after OpenCV or timeout
+                setTimeout(() => {
+                    if (!this.isOpenCVReady && !this.openCVFailed) {
+                        console.warn('⚠️ OpenCV loading timeout, proceeding with basic mode');
+                        this.onOpenCVFailed();
+                    }
+                }, 3000);
             }
-        };
-        checkOpenCV();
+        }, 100);
+    }
+    
+    updateLoadingProgress(percentage) {
+        const progressFill = document.getElementById('loadingProgress');
+        if (progressFill) {
+            progressFill.style.width = percentage + '%';
+        }
+        
+        if (percentage >= 100) {
+            setTimeout(() => {
+                const loadingScreen = document.getElementById('loadingScreen');
+                if (loadingScreen) {
+                    loadingScreen.classList.add('hidden');
+                }
+            }, 500);
+        }
+    }
+    
+    // Called when OpenCV.js loads successfully
+    onOpenCVReady() {
+        this.cv = window.cv;
+        this.isOpenCVReady = true;
+        console.log('✅ OpenCV.js loaded successfully');
+        
+        const opencvStatus = document.getElementById('opencvStatus');
+        if (opencvStatus) {
+            opencvStatus.className = 'status-indicator ready';
+            opencvStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">OpenCV Enhanced Mode Ready</span>';
+        }
+        
+        this.enablePrecisionMode();
+        this.updateLoadingProgress(100);
+    }
+    
+    // Called when OpenCV.js fails to load
+    onOpenCVFailed() {
+        this.openCVFailed = true;
+        console.warn('⚠️ OpenCV.js failed to load, using enhanced basic mode');
+        
+        const opencvStatus = document.getElementById('opencvStatus');
+        if (opencvStatus) {
+            opencvStatus.className = 'status-indicator fallback';
+            opencvStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">Enhanced Basic Mode Available</span>';
+        }
+        
+        // Disable precision mode, enable enhanced basic mode
+        const precisionBtn = document.getElementById('precisionModeBtn');
+        if (precisionBtn) {
+            precisionBtn.disabled = true;
+            precisionBtn.querySelector('.mode-description').textContent = 'Requires OpenCV.js (unavailable)';
+        }
+        
+        const basicBtn = document.getElementById('basicModeBtn');
+        if (basicBtn) {
+            basicBtn.querySelector('.mode-description').textContent = 'Enhanced accuracy with improved algorithms';
+        }
+        
+        this.updateLoadingProgress(100);
     }
     
     enablePrecisionMode() {
@@ -171,14 +201,11 @@ class AccurateDistanceMeasurementApp {
     cacheElements() {
         this.elements = {
             // Main containers
-            app: document.getElementById('app'),
             modeSelection: document.getElementById('modeSelection'),
             cameraContainer: document.getElementById('cameraContainer'),
-            loadingScreen: document.getElementById('loadingScreen'),
             
             // Controls
             unitSelector: document.getElementById('unitSelector'),
-            settingsBtn: document.getElementById('settingsBtn'),
             precisionModeBtn: document.getElementById('precisionModeBtn'),
             arModeBtn: document.getElementById('arModeBtn'),
             basicModeBtn: document.getElementById('basicModeBtn'),
@@ -190,7 +217,6 @@ class AccurateDistanceMeasurementApp {
             // Camera elements
             cameraVideo: document.getElementById('cameraVideo'),
             measurementCanvas: document.getElementById('measurementCanvas'),
-            opencvCanvas: document.getElementById('opencvCanvas'),
             
             // Status displays
             opencvStatus: document.getElementById('opencvStatus'),
@@ -201,9 +227,12 @@ class AccurateDistanceMeasurementApp {
             
             // Modals
             precisionCalibrationModal: document.getElementById('precisionCalibrationModal'),
-            settingsModal: document.getElementById('settingsModal'),
+            basicCalibrationModal: document.getElementById('basicCalibrationModal'),
             precisionReferenceSelect: document.getElementById('precisionReferenceSelect'),
+            basicReferenceSelect: document.getElementById('basicReferenceSelect'),
             startPrecisionCalibrationBtn: document.getElementById('startPrecisionCalibrationBtn'),
+            startBasicCalibrationBtn: document.getElementById('startBasicCalibrationBtn'),
+            skipCalibrationBtn: document.getElementById('skipCalibrationBtn'),
             
             // Results
             resultsPanel: document.getElementById('resultsPanel'),
@@ -242,64 +271,38 @@ class AccurateDistanceMeasurementApp {
         
         // Calibration
         this.elements.startPrecisionCalibrationBtn?.addEventListener('click', () => this.startPrecisionCalibration());
+        this.elements.startBasicCalibrationBtn?.addEventListener('click', () => this.startBasicCalibration());
+        this.elements.skipCalibrationBtn?.addEventListener('click', () => this.selectMode('basic'));
         
         // Results
         this.elements.exportBtn?.addEventListener('click', () => this.exportMeasurements());
         this.elements.newMeasurementBtn?.addEventListener('click', () => this.startNewMeasurement());
         this.elements.recalibrateBtn?.addEventListener('click', () => this.showRecalibration());
-        
-        // Settings
-        this.elements.settingsBtn?.addEventListener('click', () => this.showSettings());
-        
-        // Reference object selection
-        this.elements.precisionReferenceSelect?.addEventListener('change', (e) => {
-            this.updateReferenceObjectUI(e.target.value);
-        });
-        
-        // Custom dimensions
-        const calibrationMethods = document.querySelectorAll('input[name="calibrationMethod"]');
-        calibrationMethods.forEach(method => {
-            method.addEventListener('change', (e) => this.updateCalibrationMethod(e.target.value));
-        });
     }
     
     async checkCapabilities() {
-        console.log('🔍 Checking device capabilities...');
-        
         // Check WebXR support
-        await this.checkWebXRSupport();
-        
-        // Check camera support
-        await this.checkCameraSupport();
-        
-        this.updateCapabilityDisplay();
-    }
-    
-    async checkWebXRSupport() {
         if ('xr' in navigator) {
             try {
                 const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
                 this.webXRSupported = isSupported;
-                console.log('WebXR AR Support:', isSupported ? '✅ Available' : '❌ Not available');
             } catch (error) {
-                console.log('WebXR Check Failed:', error.message);
                 this.webXRSupported = false;
             }
         } else {
             this.webXRSupported = false;
         }
-    }
-    
-    async checkCameraSupport() {
+        
+        // Check camera support
         try {
             const devices = await navigator.mediaDevices.enumerateDevices();
             const videoDevices = devices.filter(device => device.kind === 'videoinput');
             this.cameraSupported = videoDevices.length > 0;
-            console.log('Camera Support:', this.cameraSupported ? '✅ Available' : '❌ Not available');
         } catch (error) {
-            console.log('Camera Check Failed:', error.message);
             this.cameraSupported = false;
         }
+        
+        this.updateCapabilityDisplay();
     }
     
     updateCapabilityDisplay() {
@@ -310,11 +313,11 @@ class AccurateDistanceMeasurementApp {
         
         if (this.webXRSupported) {
             statusIndicator.className = 'status-indicator supported';
-            statusText.textContent = 'WebXR AR supported - High accuracy available';
+            statusText.textContent = 'WebXR AR supported';
             this.elements.arModeBtn.disabled = false;
         } else {
             statusIndicator.className = 'status-indicator not-supported';
-            statusText.textContent = 'WebXR AR not supported - OpenCV precision mode available';
+            statusText.textContent = 'WebXR AR not supported';
         }
     }
     
@@ -327,10 +330,16 @@ class AccurateDistanceMeasurementApp {
         
         switch (mode) {
             case 'precision':
-                await this.initializePrecisionMode();
+                if (!this.isOpenCVReady) {
+                    this.showError('OpenCV.js not available. Using enhanced basic mode instead.');
+                    await this.initializeBasicMode();
+                } else {
+                    await this.initializePrecisionMode();
+                }
                 break;
             case 'ar':
-                await this.initializeARMode();
+                this.showMessage('AR mode in development. Using best available mode.', 2000);
+                await this.initializeBasicMode();
                 break;
             case 'basic':
                 await this.initializeBasicMode();
@@ -339,35 +348,15 @@ class AccurateDistanceMeasurementApp {
     }
     
     async initializePrecisionMode() {
-        console.log('🔬 Initializing Precision Mode with OpenCV...');
-        
-        if (!isOpenCVReady) {
-            this.showError('OpenCV.js is still loading. Please wait and try again.');
-            this.goBack();
-            return;
-        }
-        
-        try {
-            await this.initializeCamera();
-            this.elements.precisionCalibrationModal?.classList.remove('hidden');
-            this.updateInstructions('Precision mode selected. Please complete calibration for maximum accuracy.');
-            
-        } catch (error) {
-            console.error('❌ Precision mode failed:', error);
-            this.showError('Failed to start precision mode. Please try again.');
-        }
-    }
-    
-    async initializeARMode() {
-        console.log('🥽 Initializing AR mode...');
-        this.showMessage('AR mode is in development. Using precision mode instead.', 3000);
-        await this.initializePrecisionMode();
+        console.log('🔬 Initializing Precision Mode...');
+        await this.initializeCamera();
+        this.elements.precisionCalibrationModal?.classList.remove('hidden');
     }
     
     async initializeBasicMode() {
-        console.log('📷 Initializing basic mode...');
+        console.log('📷 Initializing Enhanced Basic Mode...');
         await this.initializeCamera();
-        this.showBasicCalibration();
+        this.elements.basicCalibrationModal?.classList.remove('hidden');
     }
     
     async initializeCamera() {
@@ -388,8 +377,6 @@ class AccurateDistanceMeasurementApp {
             
             this.canvas = this.elements.measurementCanvas;
             this.ctx = this.canvas.getContext('2d');
-            
-            this.opencvCanvas = this.elements.opencvCanvas;
             
             this.video.addEventListener('loadedmetadata', () => {
                 this.setupCanvas();
@@ -412,33 +399,39 @@ class AccurateDistanceMeasurementApp {
         this.canvas.height = this.video.videoHeight;
         this.canvas.classList.remove('hidden');
         
-        if (this.opencvCanvas) {
-            this.opencvCanvas.width = this.canvas.width;
-            this.opencvCanvas.height = this.canvas.height;
-        }
-        
         console.log(`📐 Canvas setup: ${this.canvas.width}x${this.canvas.height}`);
     }
     
     startPrecisionCalibration() {
         console.log('🔬 Starting precision calibration...');
-        
         this.elements.precisionCalibrationModal?.classList.add('hidden');
         
-        // Get reference object
         const referenceKey = this.elements.precisionReferenceSelect?.value || 'credit_card';
         this.referenceObject = this.referenceObjects[referenceKey];
         
-        // Reset state
         this.calibrationPoints = [];
         this.isCalibrationMode = true;
         this.isMeasuring = true;
         this.currentStep = 1;
         
-        // Update UI
         this.elements.calibrationStatus?.classList.remove('hidden');
         this.updateCalibrationProgress(0, 'Click top-left corner of reference object');
         
+        this.drawCanvas();
+    }
+    
+    startBasicCalibration() {
+        console.log('📷 Starting enhanced basic calibration...');
+        this.elements.basicCalibrationModal?.classList.add('hidden');
+        
+        const referenceKey = this.elements.basicReferenceSelect?.value || 'credit_card';
+        this.referenceObject = this.referenceObjects[referenceKey];
+        
+        this.calibrationPoints = [];
+        this.isCalibrationMode = true;
+        this.isMeasuring = true;
+        
+        this.updateInstructions('Click on both ends of your reference object');
         this.drawCanvas();
     }
     
@@ -462,6 +455,17 @@ class AccurateDistanceMeasurementApp {
     handleCalibrationClick(x, y) {
         this.calibrationPoints.push({ x, y, step: this.currentStep });
         
+        if (this.currentMode === 'precision' && this.isOpenCVReady) {
+            this.handlePrecisionCalibrationClick();
+        } else {
+            this.handleBasicCalibrationClick();
+        }
+        
+        this.drawCanvas();
+        this.playClickSound();
+    }
+    
+    handlePrecisionCalibrationClick() {
         const cornerNames = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
         const progress = (this.currentStep / 4) * 100;
         
@@ -472,27 +476,27 @@ class AccurateDistanceMeasurementApp {
         } else {
             this.completePrecisionCalibration();
         }
-        
-        this.drawCanvas();
-        this.playClickSound();
+    }
+    
+    handleBasicCalibrationClick() {
+        if (this.calibrationPoints.length === 2) {
+            this.completeBasicCalibration();
+        }
     }
     
     async completePrecisionCalibration() {
-        if (this.calibrationPoints.length !== 4 || !isOpenCVReady) {
-            this.showError('Calibration incomplete or OpenCV not ready');
+        if (this.calibrationPoints.length !== 4 || !this.isOpenCVReady) {
+            this.showError('Precision calibration requires 4 corners and OpenCV');
             return;
         }
         
         try {
             console.log('🔬 Computing perspective correction...');
             
-            // Convert calibration points to OpenCV format
             const srcPoints = this.calibrationPoints.map(p => [p.x, p.y]);
-            
-            // Define destination rectangle (corrected perspective)
             const refWidth = this.referenceObject.width;
             const refHeight = this.referenceObject.height;
-            const scale = 10; // Scale factor for better precision
+            const scale = 10;
             
             const dstPoints = [
                 [0, 0],
@@ -501,71 +505,82 @@ class AccurateDistanceMeasurementApp {
                 [0, refHeight * scale]
             ];
             
-            // Create OpenCV matrices
-            const srcMat = cv.matFromArray(4, 1, cv.CV_32FC2, srcPoints.flat());
-            const dstMat = cv.matFromArray(4, 1, cv.CV_32FC2, dstPoints.flat());
+            const srcMat = this.cv.matFromArray(4, 1, this.cv.CV_32FC2, srcPoints.flat());
+            const dstMat = this.cv.matFromArray(4, 1, this.cv.CV_32FC2, dstPoints.flat());
             
-            // Compute perspective transform matrix
-            this.perspectiveMatrix = cv.getPerspectiveTransform(srcMat, dstMat);
+            this.perspectiveMatrix = this.cv.getPerspectiveTransform(srcMat, dstMat);
             
-            // Calculate pixels per mm for reference
-            const pixelDistance = Math.sqrt(
-                Math.pow(srcPoints[1][0] - srcPoints[0][0], 2) + 
-                Math.pow(srcPoints[1][1] - srcPoints[0][1], 2)
-            );
             this.calibrationData = {
-                pixelsPerMM: pixelDistance / refWidth,
                 perspectiveMatrix: this.perspectiveMatrix,
                 referenceObject: this.referenceObject,
                 scale: scale,
-                correctedWidth: refWidth * scale,
-                correctedHeight: refHeight * scale
+                mode: 'precision'
             };
             
-            // Cleanup OpenCV matrices
             srcMat.delete();
             dstMat.delete();
             
-            // Update state
-            this.isCalibrated = true;
-            this.isCalibrationMode = false;
-            this.isMeasuring = false;
-            this.calibrationPoints = [];
-            
-            // Update UI
-            this.elements.calibrationStatus?.classList.add('hidden');
-            this.elements.accuracyBadge.textContent = 'High Precision (OpenCV)';
-            this.updateInstructions('✅ Precision calibration complete! Ready to measure with high accuracy.');
-            
-            this.showMessage('🎯 Precision calibration successful! Accuracy improved to ±2-5%', 3000);
-            this.drawCanvas();
-            
-            console.log('✅ Precision calibration completed:', this.calibrationData);
+            this.completeCalibration('High Precision (OpenCV)');
             
         } catch (error) {
             console.error('❌ Precision calibration failed:', error);
-            this.showError('Calibration failed. Please try again with clearer corner points.');
-            this.resetCalibration();
+            this.showError('Precision calibration failed. Using basic mode.');
+            this.completeBasicCalibration();
         }
+    }
+    
+    completeBasicCalibration() {
+        const p1 = this.calibrationPoints[0];
+        const p2 = this.calibrationPoints[1];
+        const pixelDistance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        
+        const realSize = this.referenceObject.width || this.referenceObject.diameter;
+        const calibrationFactor = realSize / pixelDistance;
+        
+        this.calibrationData = {
+            calibrationFactor: calibrationFactor,
+            referenceObject: this.referenceObject,
+            mode: 'basic'
+        };
+        
+        this.completeCalibration('Enhanced Basic (Improved)');
+    }
+    
+    completeCalibration(accuracyText) {
+        this.isCalibrated = true;
+        this.isCalibrationMode = false;
+        this.isMeasuring = false;
+        this.calibrationPoints = [];
+        
+        this.elements.calibrationStatus?.classList.add('hidden');
+        if (this.elements.accuracyBadge) {
+            this.elements.accuracyBadge.textContent = accuracyText;
+        }
+        
+        this.updateInstructions('✅ Calibration complete! Ready to measure with improved accuracy.');
+        this.showMessage('🎯 Calibration successful! Ready to measure accurately.', 2000);
+        this.drawCanvas();
+        
+        console.log('✅ Calibration completed:', this.calibrationData);
     }
     
     handleMeasurementClick(x, y) {
         this.measurementPoints.push({ x, y, timestamp: Date.now() });
         
         if (this.measurementPoints.length === 2) {
-            this.calculatePreciseDistance();
+            this.calculateDistance();
         }
         
         this.drawCanvas();
         this.playClickSound();
     }
     
-    calculatePreciseDistance() {
+    calculateDistance() {
         if (this.measurementPoints.length !== 2 || !this.isCalibrated) return;
         
         try {
-            if (this.currentMode === 'precision' && this.perspectiveMatrix) {
-                this.calculateDistanceWithPerspectiveCorrection();
+            if (this.calibrationData.mode === 'precision' && this.perspectiveMatrix) {
+                this.calculatePreciseDistance();
             } else {
                 this.calculateBasicDistance();
             }
@@ -575,55 +590,30 @@ class AccurateDistanceMeasurementApp {
         }
     }
     
-    calculateDistanceWithPerspectiveCorrection() {
+    calculatePreciseDistance() {
         const p1 = this.measurementPoints[0];
         const p2 = this.measurementPoints[1];
         
-        // Transform points using perspective correction
-        const srcPoints = cv.matFromArray(2, 1, cv.CV_32FC2, [p1.x, p1.y, p2.x, p2.y]);
-        const dstPoints = new cv.Mat();
+        const srcPoints = this.cv.matFromArray(2, 1, this.cv.CV_32FC2, [p1.x, p1.y, p2.x, p2.y]);
+        const dstPoints = new this.cv.Mat();
         
-        cv.perspectiveTransform(srcPoints, dstPoints, this.perspectiveMatrix);
+        this.cv.perspectiveTransform(srcPoints, dstPoints, this.perspectiveMatrix);
         
-        // Get corrected coordinates
         const correctedP1 = { x: dstPoints.data32F[0], y: dstPoints.data32F[1] };
         const correctedP2 = { x: dstPoints.data32F[2], y: dstPoints.data32F[3] };
         
-        // Calculate distance in corrected space
         const correctedDistance = Math.sqrt(
             Math.pow(correctedP2.x - correctedP1.x, 2) + 
             Math.pow(correctedP2.y - correctedP1.y, 2)
         );
         
-        // Convert to real-world units (mm)
         const distanceInMM = correctedDistance / this.calibrationData.scale;
         const distanceInUnit = distanceInMM * this.units[this.currentUnit].factor;
         
-        // Store measurement
-        const measurement = {
-            id: Date.now(),
-            distance: distanceInMM,
-            displayDistance: distanceInUnit,
-            unit: this.currentUnit,
-            timestamp: new Date(),
-            points: [...this.measurementPoints],
-            correctedPoints: [correctedP1, correctedP2],
-            mode: 'precision',
-            accuracy: 'high',
-            method: 'perspective_correction'
-        };
+        this.storeMeasurement(distanceInMM, distanceInUnit, 'precision', 'high');
         
-        this.measurements.push(measurement);
-        this.displayDistance(distanceInUnit);
-        this.updateResultsPanel();
-        this.resetMeasurementState();
-        
-        // Cleanup OpenCV matrices
         srcPoints.delete();
         dstPoints.delete();
-        
-        console.log(`🎯 Precision measurement: ${distanceInUnit.toFixed(this.settings.decimalPlaces)} ${this.units[this.currentUnit].symbol}`);
-        this.showMessage(`📏 Distance: ${distanceInUnit.toFixed(this.settings.decimalPlaces)} ${this.units[this.currentUnit].symbol}`, 2000);
     }
     
     calculateBasicDistance() {
@@ -631,9 +621,13 @@ class AccurateDistanceMeasurementApp {
         const p2 = this.measurementPoints[1];
         
         const pixelDistance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-        const distanceInMM = pixelDistance / this.calibrationData.pixelsPerMM;
+        const distanceInMM = pixelDistance * this.calibrationData.calibrationFactor;
         const distanceInUnit = distanceInMM * this.units[this.currentUnit].factor;
         
+        this.storeMeasurement(distanceInMM, distanceInUnit, 'enhanced_basic', 'medium');
+    }
+    
+    storeMeasurement(distanceInMM, distanceInUnit, mode, accuracy) {
         const measurement = {
             id: Date.now(),
             distance: distanceInMM,
@@ -641,9 +635,8 @@ class AccurateDistanceMeasurementApp {
             unit: this.currentUnit,
             timestamp: new Date(),
             points: [...this.measurementPoints],
-            mode: 'basic',
-            accuracy: 'medium',
-            method: 'triangle_similarity'
+            mode: mode,
+            accuracy: accuracy
         };
         
         this.measurements.push(measurement);
@@ -651,7 +644,8 @@ class AccurateDistanceMeasurementApp {
         this.updateResultsPanel();
         this.resetMeasurementState();
         
-        console.log(`📏 Basic measurement: ${distanceInUnit.toFixed(this.settings.decimalPlaces)} ${this.units[this.currentUnit].symbol}`);
+        console.log(`📏 Measurement: ${distanceInUnit.toFixed(this.settings.decimalPlaces)} ${this.units[this.currentUnit].symbol}`);
+        this.showMessage(`📏 Distance: ${distanceInUnit.toFixed(this.settings.decimalPlaces)} ${this.units[this.currentUnit].symbol}`, 2000);
     }
     
     resetMeasurementState() {
@@ -676,25 +670,22 @@ class AccurateDistanceMeasurementApp {
         
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
-        // Draw calibration points
         if (this.isCalibrationMode && this.calibrationPoints.length > 0) {
             this.drawCalibrationPoints();
         }
         
-        // Draw measurement points
         if (this.measurementPoints.length > 0) {
             this.drawMeasurementPoints();
         }
     }
     
     drawCalibrationPoints() {
-        const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00']; // Red, Green, Blue, Yellow
-        const cornerNames = ['TL', 'TR', 'BR', 'BL'];
+        const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00'];
+        const cornerNames = this.currentMode === 'precision' ? ['TL', 'TR', 'BR', 'BL'] : ['1', '2'];
         
         this.calibrationPoints.forEach((point, index) => {
-            const color = colors[index];
+            const color = colors[index] || '#FF0000';
             
-            // Draw point
             this.ctx.fillStyle = color;
             this.ctx.strokeStyle = '#FFFFFF';
             this.ctx.lineWidth = 3;
@@ -704,15 +695,14 @@ class AccurateDistanceMeasurementApp {
             this.ctx.fill();
             this.ctx.stroke();
             
-            // Draw label
             this.ctx.fillStyle = '#FFFFFF';
             this.ctx.font = 'bold 14px Arial';
             this.ctx.textAlign = 'center';
-            this.ctx.fillText(cornerNames[index], point.x, point.y + 5);
+            this.ctx.fillText(cornerNames[index] || (index + 1).toString(), point.x, point.y + 5);
         });
         
-        // Draw lines between points
-        if (this.calibrationPoints.length > 1) {
+        // Draw lines for precision mode
+        if (this.currentMode === 'precision' && this.calibrationPoints.length > 1) {
             this.ctx.strokeStyle = '#00FF00';
             this.ctx.lineWidth = 2;
             this.ctx.setLineDash([5, 5]);
@@ -724,7 +714,6 @@ class AccurateDistanceMeasurementApp {
                 this.ctx.stroke();
             }
             
-            // Close the rectangle if we have all 4 points
             if (this.calibrationPoints.length === 4) {
                 this.ctx.beginPath();
                 this.ctx.moveTo(this.calibrationPoints[3].x, this.calibrationPoints[3].y);
@@ -733,6 +722,16 @@ class AccurateDistanceMeasurementApp {
             }
             
             this.ctx.setLineDash([]);
+        }
+        
+        // Draw line for basic mode
+        if (this.currentMode === 'basic' && this.calibrationPoints.length === 2) {
+            this.ctx.strokeStyle = '#00FF00';
+            this.ctx.lineWidth = 3;
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.calibrationPoints[0].x, this.calibrationPoints[0].y);
+            this.ctx.lineTo(this.calibrationPoints[1].x, this.calibrationPoints[1].y);
+            this.ctx.stroke();
         }
     }
     
@@ -745,7 +744,6 @@ class AccurateDistanceMeasurementApp {
         this.ctx.fillStyle = primaryColor;
         this.ctx.lineWidth = 3;
         
-        // Draw line between points
         if (this.measurementPoints.length === 2) {
             this.ctx.beginPath();
             this.ctx.moveTo(this.measurementPoints[0].x, this.measurementPoints[0].y);
@@ -753,20 +751,16 @@ class AccurateDistanceMeasurementApp {
             this.ctx.stroke();
         }
         
-        // Draw points
         this.measurementPoints.forEach((point, index) => {
-            // Outer circle
             this.ctx.beginPath();
             this.ctx.arc(point.x, point.y, pointRadius, 0, 2 * Math.PI);
             this.ctx.fill();
             
-            // Inner circle
             this.ctx.fillStyle = secondaryColor;
             this.ctx.beginPath();
             this.ctx.arc(point.x, point.y, pointRadius - 3, 0, 2 * Math.PI);
             this.ctx.fill();
             
-            // Point number
             this.ctx.fillStyle = primaryColor;
             this.ctx.font = 'bold 14px Arial';
             this.ctx.textAlign = 'center';
@@ -793,10 +787,10 @@ class AccurateDistanceMeasurementApp {
     
     toggleMeasurement() {
         if (!this.isCalibrated) {
-            if (this.currentMode === 'precision') {
+            if (this.currentMode === 'precision' && this.isOpenCVReady) {
                 this.elements.precisionCalibrationModal?.classList.remove('hidden');
             } else {
-                this.showBasicCalibration();
+                this.elements.basicCalibrationModal?.classList.remove('hidden');
             }
             return;
         }
@@ -819,8 +813,7 @@ class AccurateDistanceMeasurementApp {
         this.elements.clearBtn?.classList.remove('hidden');
         this.elements.undoBtn?.classList.remove('hidden');
         
-        const mode = this.currentMode === 'precision' ? 'precision' : 'basic';
-        this.updateInstructions(`Click two points to measure distance (${mode} mode)`);
+        this.updateInstructions('Click two points to measure distance between them');
     }
     
     stopMeasuring() {
@@ -863,14 +856,14 @@ class AccurateDistanceMeasurementApp {
         
         this.measurements.forEach((measurement, index) => {
             const convertedDistance = measurement.distance * this.units[this.currentUnit].factor;
-            const accuracyIcon = measurement.accuracy === 'high' ? '🎯' : measurement.accuracy === 'medium' ? '📐' : '📏';
+            const accuracyIcon = measurement.accuracy === 'high' ? '🎯' : '📐';
             
             const item = document.createElement('div');
             item.className = 'measurement-item';
             item.innerHTML = `
                 <div class="measurement-info">
                     <div class="measurement-label">${accuracyIcon} Measurement ${index + 1}</div>
-                    <div class="measurement-details">${measurement.method} • ${measurement.accuracy} accuracy</div>
+                    <div class="measurement-details">${measurement.mode} • ${measurement.accuracy} accuracy</div>
                 </div>
                 <div class="measurement-value">${convertedDistance.toFixed(this.settings.decimalPlaces)} ${this.units[this.currentUnit].symbol}</div>
             `;
@@ -904,16 +897,15 @@ class AccurateDistanceMeasurementApp {
         }
         
         const exportData = {
-            appName: 'Accurate Distance Measurement App',
-            version: '2.0 (OpenCV Enhanced)',
+            appName: 'Fixed Accurate Distance Measurement App',
+            version: '2.1 (Fixed)',
             exportDate: new Date().toISOString(),
             calibrationData: {
                 isCalibrated: this.isCalibrated,
-                method: this.currentMode,
-                referenceObject: this.referenceObject?.name,
-                accuracy: this.currentMode === 'precision' ? 'high' : 'medium'
+                mode: this.currentMode,
+                openCVAvailable: this.isOpenCVReady,
+                referenceObject: this.referenceObject?.name
             },
-            settings: this.settings,
             measurements: this.measurements.map(m => ({
                 id: m.id,
                 distance_mm: m.distance,
@@ -921,15 +913,13 @@ class AccurateDistanceMeasurementApp {
                 unit: m.unit,
                 timestamp: m.timestamp,
                 mode: m.mode,
-                accuracy: m.accuracy,
-                method: m.method
+                accuracy: m.accuracy
             })),
             summary: {
                 totalMeasurements: this.measurements.length,
                 averageDistance: this.measurements.reduce((sum, m) => sum + m.distance, 0) / this.measurements.length,
                 minDistance: Math.min(...this.measurements.map(m => m.distance)),
-                maxDistance: Math.max(...this.measurements.map(m => m.distance)),
-                accuracyMode: this.currentMode
+                maxDistance: Math.max(...this.measurements.map(m => m.distance))
             }
         };
         
@@ -938,28 +928,28 @@ class AccurateDistanceMeasurementApp {
         const a = document.createElement('a');
         
         a.href = url;
-        a.download = `accurate-measurements-${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `fixed-measurements-${new Date().toISOString().split('T')[0]}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
         this.showMessage('📤 Measurements exported successfully', 2000);
-        console.log('📤 Export completed:', this.measurements.length, 'measurements');
     }
     
     startNewMeasurement() {
         this.measurementPoints = [];
         this.resetMeasurementState();
-        this.updateInstructions('Ready for new measurements. Click "Start Measuring" to begin.');
+        this.updateInstructions('Ready for new measurements.');
     }
     
     showRecalibration() {
-        if (this.currentMode === 'precision') {
+        if (this.currentMode === 'precision' && this.isOpenCVReady) {
             this.resetCalibration();
             this.elements.precisionCalibrationModal?.classList.remove('hidden');
         } else {
-            this.showBasicCalibration();
+            this.resetCalibration();
+            this.elements.basicCalibrationModal?.classList.remove('hidden');
         }
     }
     
@@ -967,18 +957,12 @@ class AccurateDistanceMeasurementApp {
         this.isCalibrated = false;
         this.calibrationData = null;
         this.calibrationPoints = [];
-        this.perspectiveMatrix = null;
+        if (this.perspectiveMatrix) {
+            this.perspectiveMatrix.delete();
+            this.perspectiveMatrix = null;
+        }
         this.currentStep = 0;
         this.elements.calibrationStatus?.classList.add('hidden');
-    }
-    
-    showBasicCalibration() {
-        // Implementation for basic calibration modal
-        this.showMessage('Basic calibration not implemented in this demo. Use precision mode.', 3000);
-    }
-    
-    showSettings() {
-        this.elements.settingsModal?.classList.remove('hidden');
     }
     
     goBack() {
@@ -1000,8 +984,8 @@ class AccurateDistanceMeasurementApp {
         this.elements.cameraContainer?.classList.add('hidden');
         this.elements.modeSelection?.classList.remove('hidden');
         this.elements.precisionCalibrationModal?.classList.add('hidden');
+        this.elements.basicCalibrationModal?.classList.add('hidden');
         this.elements.resultsPanel?.classList.add('hidden');
-        this.elements.settingsModal?.classList.add('hidden');
         
         console.log('⬅️ Returned to mode selection');
     }
@@ -1070,52 +1054,15 @@ class AccurateDistanceMeasurementApp {
             // Ignore audio errors
         }
     }
-    
-    updateReferenceObjectUI(value) {
-        const customDimensions = document.getElementById('customDimensions');
-        if (customDimensions) {
-            if (value === 'custom') {
-                customDimensions.classList.remove('hidden');
-            } else {
-                customDimensions.classList.add('hidden');
-            }
-        }
-    }
-    
-    updateCalibrationMethod(method) {
-        console.log('Calibration method changed:', method);
-        // Update UI based on selected method
-    }
 }
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🎉 DOM loaded, initializing Accurate Distance Measurement App...');
-    
-    // Start loading progress
-    let progress = 0;
-    const progressInterval = setInterval(() => {
-        progress += 2;
-        updateLoadingProgress(Math.min(progress, 90)); // Stop at 90%, OpenCV will complete to 100%
-        
-        if (progress >= 90) {
-            clearInterval(progressInterval);
-        }
-    }, 100);
-    
+    console.log('🎉 DOM loaded, initializing Fixed Distance Measurement App...');
     window.accurateDistanceApp = new AccurateDistanceMeasurementApp();
 });
 
-// Global error handling
-window.addEventListener('error', (event) => {
-    console.error('Global error:', event.error);
-});
-
-window.addEventListener('unhandledrejection', (event) => {
-    console.error('Unhandled promise rejection:', event.reason);
-});
-
-// Export for potential module usage
+// Export for module usage
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = AccurateDistanceMeasurementApp;
 }
